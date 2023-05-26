@@ -1,0 +1,90 @@
+library(readxl)
+library(randomForest)
+library(party)
+library(partykit)
+library(rpart)
+library(rpart.plot)
+library(tree)
+
+
+datos = read_excel('NDatos2000_2010.xlsx')
+#Las columnas 23, 24 y 25 de la base de datos se eliminan por no ser útiles. 
+datos <- datos[-c(23,24,25)]
+#Las columnas se renombran para evitar errores en las funciones
+colnames(datos) <- c("V1","V2","V3","V4","V5","V6","V7","V8","V9","V10","V11","V12","V13","V14","V15","V16","V17","V18","V19","V20","V21","V22","V23","V24","V25")
+#El tipo de la columna 12 se cambia a "numérico" para eliminar NA y errores en las funciones. 
+datos$V12 <- replace(datos$V12, is.na(datos$V12), "0")
+datos$V12 <- as.numeric(datos$V12)
+lapply(datos,class)
+
+set.seed(12345)
+sub = sample(1:nrow(datos),nrow(datos)*0.7)
+train = datos[sub,]
+test = datos[-sub,]
+
+## Modelo rpart
+
+arbol_rpart_train = rpart(V19~.,data=train,na.action=na.pass,control=rpart.control(cp=0.04,xval=10))
+predict_rpart = predict(arbol_rpart_train, newdata = test)
+error_prediccion_rpart = test[,19] - predict_rpart
+MSE_RP = sum(error_prediccion_rpart^2)/nrow(test)
+
+## Modelo Random Forrest
+
+arbol_rf_train=randomForest(V19~.,data=train,ntree=500,maxnodes=250, importance=TRUE, mtry=4)
+predict_rf = predict(arbol_rf_train,newdata=test,type="response")
+error_prediccion_rf=test[,19]-predict_rf
+MSE_RF=sum(error_prediccion_rf^2)/nrow(test)
+
+
+
+## Modelo tree
+
+arbol_tree_train = tree(V19 ~ .,data=train)
+predict_tree=predict(arbol_tree_train,newdata=test)
+error_prediccion_tree = test[,19] - predict_tree
+MSE_TR = sum(error_prediccion_tree^2)/nrow(test)
+
+# Modelo CI
+
+arbol_party_train=ctree(V19~.,data=train,control=ctree_control(maxdepth=8))
+predict_party=predict(arbol_party_train,newdata=test)
+error_prediccion_party = test[,19] - predict_party
+MSE_CI = sum(error_prediccion_party^2)/nrow(test)
+
+
+## Comparacion de las predicciones
+
+observ=datos[-sub,"V19"] 
+comparacion=cbind(predict_party, predict_tree, predict_rf, predict_rpart,observ)
+comparacion=round(comparacion,2);comparacion
+
+
+# Importancia de variables para CI
+
+data.frame(varimp(arbol_party_train))
+
+# Importancia de variables para RF
+
+importance_rf = data.frame(importance(arbol_rf_train))
+importance_rf[order(-importance_rf$`X.IncMSE`),]
+
+## Prediccion a partir del 11 de diciembre de 2010
+# Utilisamos el modelo CI
+
+test_prevision = datos[datos$`V1` == 11 & datos$`V2` == 12 & datos$`V3` == 2010,]
+train_prevision = datos[datos$`V1` != 11 | datos$`V2` != 12 | datos$`V3` != 2010,]
+arbol_party_train_prevision=ctree(V19~.,data=train_prevision,control=ctree_control(maxdepth=8))
+predc.pa_prevision=predict(arbol_party_train_prevision,newdata=test_prevision)
+error_prediccion_party_prevision = test_prevision[,19] - predc.pa_prevision
+MSE_CI_prevision = sum(error_prediccion_party_prevision^2)/nrow(test_prevision)
+
+
+
+plot(datos$'V19', type = "l", col = "red", xlab = "Index", ylab = "Valeur", 
+     # xlim = c(17500,18200),
+     main = "Curvas de aprendizaje y pruebas")
+points(seq_along(predict_party), predict_party, 
+       type = "p", pch = 3, cex = 0.1,
+       col = "blue")
+
